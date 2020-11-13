@@ -20,6 +20,7 @@ import java.util.*;
 public class Router implements Runnable
 {
     public static final int BUFFER_SIZE = 1024;
+    public static final int CHUNK_SIZE  = 10;
 
     private DatagramSocket socket;
     private InetAddress    group;

@@ -24,9 +24,6 @@ import java.io.FileInputStream;
  */
 public class Client implements Runnable
 {
-    private static final int BROADCAST_INTERVAL = 1;
-    private static final int CHUNK_SIZE         = 10;
-
     private InetAddress    src_address;
     private InetAddress    dest_addr;
     private DatagramSocket socket;
@@ -195,9 +192,10 @@ public class Client implements Runnable
 
         List<Packet> packets_to_send = new ArrayList<>();
 
-        for( int i = 0; i < bFile.length; i += CHUNK_SIZE )
+        for( int i = 0; i < bFile.length; i += Router.CHUNK_SIZE )
         {
-            byte[] byte_chunk = Arrays.copyOfRange(bFile, i, Math.min(bFile.length, i+CHUNK_SIZE));
+            byte[] byte_chunk = Arrays.copyOfRange(bFile, i, Math.min(bFile.length, 
+                        i+Router.CHUNK_SIZE));
             this.packets.add(new Packet(ack_num, seq_num, byte_chunk, syn, ack, fin));
 
             System.out.println("====================== Sending ==================");
