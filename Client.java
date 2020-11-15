@@ -9,8 +9,7 @@ import java.util.Arrays;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ThreadLocalRandom;
 
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.*;
 
 /**
  * <h1>Client Class</h1>
@@ -24,16 +23,19 @@ import java.io.FileInputStream;
  */
 public class Client implements Runnable
 {
-    private InetAddress    src_address;
-    private InetAddress    dest_addr;
-    private DatagramSocket socket;
-    private int            port;
+    private static final String OUT_FILE = "out.txt";
+
+    private InetAddress      src_address;
+    private InetAddress      dest_addr;
+    private DatagramSocket   socket;
+    private int              port;
+    private FileOutputStream file_output;
 
     // State of current object.
-    private String         filename;
-    private List<Packet>   packets;
-    private long           ack_num;
-    private long           seq_num;
+    private String           filename;
+    private List<Packet>     packet_buffer;
+    private long             ack_num;
+    private long             seq_num;
 
     /**
      * Constructor: Creates a broadcasting object and set up socket and group prior
@@ -48,17 +50,27 @@ public class Client implements Runnable
      */
     public Client(String dest_addr, int port, String filename) throws IOException
     {
-        this.dest_addr    = InetAddress.getByName(dest_addr);
-        this.port         = port;
-        this.src_address  = InetAddress.getLocalHost();
-        this.packets      = new ArrayList<>();
-        this.filename     = filename;
-        
-        // TODO: Read in file and setup byte chunks.
-        //getByteChunksFromFile(msg_file);
-
+        this.dest_addr     = InetAddress.getByName(dest_addr);
+        this.port          = port;
+        this.src_address   = InetAddress.getLocalHost();
+        this.packet_buffer = new ArrayList<>();
+        this.filename      = filename;
+        this.file_output   = new FileOutputStream(OUT_FILE);
+         
         // Socket setup.
-        this.socket       = new DatagramSocket(this.port);
+        this.socket        = new DatagramSocket(this.port);
+    }
+
+    private void outputData(byte[] buffer)
+    {
+        try
+        {
+            this.file_output.write(buffer);
+            this.file_output.flush();
+        } catch( IOException ex )
+        {
+            ex.printStackTrace();
+        }
     }
 
     private void initHandshake()
@@ -122,6 +134,9 @@ public class Client implements Runnable
                     // Send response to SYN+ACK to finalize connection.
                     this.socket.send(send_packet);
 
+                    this.seq_num = this.ack_num;
+                    this.seq_num--;
+
                     // We're done here.
                     System.out.println("CLIENT: Handshake completed");
                     break;
@@ -159,48 +174,53 @@ public class Client implements Runnable
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
 
+                // Parse incoming file packet.
+                Packet file_packet = new Packet(packet);
+
+                // Create ACK packet and send.
+                Packet ack = new Packet();
+
+                // If sequence numbers match, no packets have been lost/dropped,
+                // save content to file.
+                if( file_packet.getSeqNum() == this.seq_num + 1 )
+                {
+                    System.out.println("Sequence numbers match, no dropped packets");
+                    outputData(file_packet.getData());
+
+                    // Set ACK number to sequence number received +1
+                    ack.setAckNum(file_packet.getSeqNum() + 1);
+                    ack.setAckFlag();
+                
+                    // Update current sequence number.
+                    this.seq_num += file_packet.getData().length;
+                } 
+                    
+                // If not the right sequence, store current packet in buffer and await
+                // correct next packet.
+                else
+                {
+                    System.out.format("Packet sequence number mismatch: %d != %d", 
+                            this.seq_num, file_packet.getSeqNum());
+
+                    // Add out of order packet to buffer for later.
+                    this.packet_buffer.add(file_packet);
+
+                    // Set ACK number to sequence number received +1
+                    ack.setAckNum(this.seq_num + 1);
+                    ack.setAckFlag();
+                }
+
+                // Send ACK packet.
+                byte[] ack_bytes = ack.toByteArray();
+                DatagramPacket ack_packet = new DatagramPacket(ack_bytes, ack_bytes.length,
+                        this.dest_addr, this.port);
+
+                this.socket.send(ack_packet);
+
             } catch( IOException ex )
             {
                 ex.printStackTrace();
             }
         }
-    }
-
-    private void getByteChunksFromFile(File file)
-    {
-        FileInputStream fileInputStream = null;
-        byte[] bFile = new byte[(int) file.length()];
-
-        try
-        {
-            fileInputStream = new FileInputStream(file);
-            fileInputStream.read(bFile);
-            fileInputStream.close();
-        }
-
-        catch( Exception ex )
-        {
-            ex.printStackTrace();
-        }
-
-        // Setup packet header values.
-        int  syn     = 0, 
-             ack     = 0, 
-             fin     = 0;
-        long seq_num = 0,
-             ack_num = 0;
-
-        List<Packet> packets_to_send = new ArrayList<>();
-
-        for( int i = 0; i < bFile.length; i += Router.CHUNK_SIZE )
-        {
-            byte[] byte_chunk = Arrays.copyOfRange(bFile, i, Math.min(bFile.length, 
-                        i+Router.CHUNK_SIZE));
-            this.packets.add(new Packet(ack_num, seq_num, byte_chunk, syn, ack, fin));
-
-            System.out.println("====================== Sending ==================");
-            System.out.println(new String(byte_chunk, StandardCharsets.UTF_8));
-        }
-        System.out.println("Chunk Number: " + this.packets.size());
     }
 }

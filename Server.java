@@ -13,11 +13,10 @@ public class Server implements Runnable
     private int            dest_port;
 
     // State of current object.
-    private List<Packet>   packets;
     private long           ack_num;
     private long           seq_num;
+    private long           init_seq_num;
     
-    //private File           file_request;
     private InputStream    file_stream;
     private int            last_command;
 
@@ -28,8 +27,6 @@ public class Server implements Runnable
         this.port         = port;
         this.dest_port    = port; // temp assignment
         this.src_address  = InetAddress.getLocalHost();
-        this.packets      = new ArrayList<>();
-        //this.file_request = null;
         this.file_stream  = null;
         this.last_command = 0;
         
@@ -87,7 +84,8 @@ public class Server implements Runnable
                 {
                     System.out.println("SERVER: Handshake complete");
                     this.last_command = p.getCommand();
-                    
+                    this.init_seq_num = this.seq_num;
+
                     // Check for file request.
                     // No other scenarios to include.
                     if( this.last_command == 1 )
@@ -122,6 +120,11 @@ public class Server implements Runnable
         return (file_req.exists() && file_req.isFile());
     }
 
+    private void sendFileChunk()
+    {
+
+    }
+
     @Override
     public void run()
     {
@@ -131,25 +134,8 @@ public class Server implements Runnable
         // TODO Check what command is
         // If file transfer, check if 
 
-        
-        //FileOutputStream fos = null;
-        //try
-        //{
-        //    fos = new FileOutputStream("out.txt");
-        //} catch( Exception ex )
-        //{
-        //    ex.printStackTrace();
-        //}
-        //fos.write(temp);
-        //fos.flush();
-        //
-        
         byte[] buffer = new byte[Router.BUFFER_SIZE];
 
-        //
-        // Read file chunk
-        // Create packet with appropriate seq num
-        // Send
         //
         // Receive
         // Parse commands / ACK (potentially will have re-send)
@@ -161,10 +147,35 @@ public class Server implements Runnable
 
             try
             {
-                // Receive packets.
-                DatagramPacket recv_packet = new DatagramPacket(buffer, buffer.length,
-                        this.dest_addr, this.dest_port);
-                socket.send(recv_packet);
+                if( this.file_stream.read(send_buffer) != -1 )
+                {
+                    Packet file_packet = new Packet();
+
+                    // Set command to file response.
+                    file_packet.setCommand(2);
+
+                    // Set ack and seq nums.
+                    file_packet.setSeqNum(this.seq_num);
+                    
+                    // Add data.
+                    file_packet.setData(send_buffer);
+
+                    byte[] file_packet_bytes = file_packet.toByteArray();
+
+                    // Receive packets.
+                    DatagramPacket recv_packet = new DatagramPacket(
+                            file_packet_bytes, file_packet_bytes.length,
+                            this.dest_addr, this.dest_port);
+                    socket.send(recv_packet);
+
+                    this.seq_num += file_packet.getData().length;
+                }
+
+                DatagramPacket ack_packet = new DatagramPacket(buffer, buffer.length);
+                this.socket.receive(ack_packet);
+                Packet ack = new Packet(ack_packet);
+
+                this.ack_num = ack.getAckNum();
                 
             } catch( IOException ex )
             {
